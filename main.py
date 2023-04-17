@@ -8,6 +8,8 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 
+import shutil
+import time
 
 cwd = os.getcwd()
 firefoxdriverpath = os.path.join(cwd,"resources/firefoxdriver")
@@ -40,19 +42,29 @@ for tag in containers:
     while(j<=k):
         #get xpath of each html tag
         xpath = f'/html/body/div[2]/c-wiz/div[3]/div[1]/div/div/div/div/div[1]/div[1]/span/div[1]/div[1]/div[{i}]/a[1]/div[1]/img'
-        try:
-
-            #check if the xpath points to correct image
-            tagi = str(driver.find_element(By.XPATH, xpath))
+        try:           
 
             #click on the image
             image = WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, xpath)))
             image.click()
-            #WebDriverWait(driver,20)
+            
 
-            #imagepath = f"/html/body/div[2]/c-wiz/div[3]/div[2]/div[3]/div[2]/div/div[2]/div[2]/div[2]/c-wiz/div/div[2]/div[1]/a/img[1]"
-            #image_tag = str(driver.find_element(By.XPATH, imagepath))
-            #image_tag.getattribute('src')
+            imagepath = '/html/body/div[2]/c-wiz/div[3]/div[2]/div[3]/div[2]/div/div[2]/div[2]/div[2]/c-wiz/div/div[2]/div[1]/a/img[1]'
+            
+            # get the tag corresponding to the image
+            tagi = driver.find_element(By.XPATH, imagepath)     
+            src = tagi.get_attribute('src')
+            print('here')
+            response = requests.get(src)
+            print('here2')
+            filepath = f"/home/sagarvincent/projects/Softwareengineering/Webscrapper/data/images/{i}.jpg"
+            if response.status_code == 200:
+                try:
+                    with open(filepath, 'wb') as f:                        
+                        f.write(response.content)
+                        
+                except:
+                    print('couldnt download')
 
         except:
             
