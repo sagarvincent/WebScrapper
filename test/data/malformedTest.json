@@ -1,0 +1,13 @@
+{
+    "tag": "root",
+    "children": [
+      {"tag": "p", "content": "Unclosed paragraph"},
+      {
+        "tag": "div",
+        "children": [
+          {"tag": "span", "content": "Incorrectly nested"}
+        ]
+      }
+    ]
+  }
+  

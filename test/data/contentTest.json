@@ -1,0 +1,9 @@
+{
+    "tag": "root",
+    "children": [
+      {"tag": "div"},
+      {"tag": "p", "content": "Content"},
+      {"tag": "img", "attributes": {"src": "image.jpg"}}
+    ]
+  }
+  

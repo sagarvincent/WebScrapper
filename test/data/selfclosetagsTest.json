@@ -1,0 +1,9 @@
+{
+    "tag": "root",
+    "children": [
+      {"tag": "img", "attributes": {"src": "image.jpg", "alt": "An image"}},
+      {"tag": "br"},
+      {"tag": "input", "attributes": {"type": "text"}}
+    ]
+  }
+  

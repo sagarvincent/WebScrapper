@@ -1,0 +1,11 @@
+{
+    "tag": "div",
+    "children": [
+      {
+        "tag": "script",
+        "attributes": {"type": "text/custom"},
+        "content": "\n    function customFunc() {\n      return '<p>Dynamic content</p>';\n    }\n  "
+      }
+    ]
+  }
+  

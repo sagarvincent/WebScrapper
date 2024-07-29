@@ -1,0 +1,12 @@
+{
+    "tag": "div",
+    "children": [
+      {
+        "tag": "div",
+        "children": [
+          {"tag": "p", "content": "Nested paragraph"}
+        ]
+      }
+    ]
+  }
+  

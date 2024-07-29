@@ -1,0 +1,8 @@
+{
+    "tag": "head",
+    "children": [
+      {"tag": "title", "content": "Special Title"},
+      {"tag": "meta", "attributes": {"name": "description", "content": "A description"}}
+    ]
+  }
+  

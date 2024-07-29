@@ -1,0 +1,8 @@
+{
+    "tag": "div",
+    "children": [
+      {"tag": "p", "content": "Text with spaces"},
+      {"tag": "pre", "content": "\n        Preserved\n        whitespace\n    "}
+    ]
+  }
+  

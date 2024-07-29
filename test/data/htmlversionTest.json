@@ -1,0 +1,22 @@
+
+  {
+    "doctype": "html",
+    "tag": "html",
+    "attributes": {"lang": "en"},
+    "children": [
+      {
+        "tag": "head",
+        "children": [
+          {"tag": "meta", "attributes": {"charset": "UTF-8"}},
+          {"tag": "title", "content": "HTML5 Page"}
+        ]
+      },
+      {
+        "tag": "body",
+        "children": [
+          {"tag": "p", "content": "Content"}
+        ]
+      }
+    ]
+  }
+  

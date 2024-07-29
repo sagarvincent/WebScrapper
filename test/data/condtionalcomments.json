@@ -1,0 +1,8 @@
+{
+    "tag": "root",
+    "children": [
+      {"type": "conditional_comment", "condition": "IE 8", "content": "\n<p>This is visible to IE 8 users.</p>\n"},
+      {"tag": "p", "content": "This is visible to everyone."}
+    ]
+  }
+  
