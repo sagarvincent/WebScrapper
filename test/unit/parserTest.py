@@ -1,62 +1,95 @@
 import unittest
+import os
+import json
 from src.cparser import parser
 
 class parserTest(unittest.TestCase):
 
     # initialise the parser
-    def intialise(self):
+    def setUp(self):
         self.parser = parser()
-    # test base case of well formed html
+        self.test_data_dir = "src/test/data/parse_test/"
+
+    def run_test(self, test_name):
+        with open(os.path.join(self.test_data_dir, f"{test_name}Test.html"), "r") as html_file:
+            html_content = html_file.read()
+        
+        with open(os.path.join(self.test_data_dir, f"{test_name}Test.json"), "r") as json_file:
+            expected_output = json.load(json_file)
+        
+        parsed_output = self.parser.parse(html_content)
+        self.assertEqual(parsed_output, expected_output)
+
+   
+    # Test base case of well-formed HTML
     def test_base(self):
-        pass
-    # test malformed html code
+        self.run_test("base")
+
+    # Test malformed HTML code
     def test_malformed(self):
-        pass
-    # test white space handling
+        self.run_test("malformed")
+
+    # Test whitespace handling
     def test_whitespace(self):
-        pass 
-    # test handling of self closing tags
+        self.run_test("whitespace")
+
+    # Test handling of self-closing tags
     def test_selfclosetags(self):
-        pass 
-    # test blocks and nested blocks
+        self.run_test("selfclosetags")
+
+    # Test blocks
     def test_blocks(self):
-        pass
+        self.run_test("blocks")
+
+    # Test nested blocks
     def test_nestedblocks(self):
-        pass
-    # test blocks inside list elements
+        self.run_test("nestedblocks")
+
+    # Test blocks inside list elements
     def test_listblocks(self):
-        pass
-    # test multiple blocks in list elements
-    def test_mutliblocklist(self):
-        pass
-    # test special handling for elements liek title
+        self.run_test("listblocks")
+
+    # Test multiple blocks in list elements
+    def test_multiblocklist(self):
+        self.run_test("multiblockslist")
+
+    # Test special handling for elements like title
     def test_IDspelements(self):
-        pass
-    # test handling of HTML entities & char references
+        self.run_test("IDspelements")
+
+    # Test handling of HTML entities & character references
     def test_htmlEntChar(self):
-        pass 
-    # testing handling of span(inline) elements
+        self.run_test("htmlEntChar")
+
+    # Test handling of span (inline) elements
     def test_inlineelem(self):
-        pass 
-    # test handling custom scripts or Non-standard markup injection
+        self.run_test("inlineelem")
+
+    # Test handling custom scripts or non-standard markup injection
     def test_customscripts(self):
-        pass
-    # test handling of different content types and missing content
+        self.run_test("customscripts")
+
+    # Test handling of different content types and missing content
     def test_content(self):
-        pass 
-    # test attributes handling
+        self.run_test("content")
+
+    # Test attributes handling
     def test_attributes(self):
-        pass
-    # test case sensitivity handling
+        self.run_test("attributes")
+
+    # Test case sensitivity handling
     def test_casesensitivity(self):
-        pass
-    # test dealing with html versions & doctypes
+        self.run_test("casesensitivity")
+
+    # Test dealing with HTML versions & doctypes
     def test_htmlversion(self):
-        pass
-    # test parsing of foreign content
+        self.run_test("htmlversion")
+
+    # Test parsing of foreign content
     def test_foreigncontent(self):
-        pass
-    # test handling contitional comments
+        self.run_test("foreigncontent")
+
+    # Test handling conditional comments
     def test_conditionalcomments(self):
-        pass
+        self.run_test("conditionalcomments")
     
