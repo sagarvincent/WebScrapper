@@ -1,0 +1,173 @@
+{
+    "doctype": "html",
+    "html": {
+      "lang": "en",
+      "head": {
+        "meta": [
+          {
+            "charset": "UTF-8"
+          },
+          {
+            "name": "viewport",
+            "content": "width=device-width, initial-scale=1.0"
+          }
+        ],
+        "title": "Complex HTML Test Case",
+        "style": ".highlight { color: red; }"
+      },
+      "body": {
+        "header": {
+          "h1": {
+            "id": "main-title",
+            "class": ["title", "highlight"],
+            "text": "Welcome to Our Website"
+          },
+          "nav": {
+            "ul": {
+              "li": [
+                {
+                  "a": {
+                    "href": "#home",
+                    "text": "Home"
+                  }
+                },
+                {
+                  "a": {
+                    "href": "#about",
+                    "text": "About"
+                  }
+                },
+                {
+                  "a": {
+                    "href": "#contact",
+                    "text": "Contact"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "main": {
+          "section": [
+            {
+              "id": "home",
+              "h2": "Home Section",
+              "p": "This is the <em>home</em> section of our website.",
+              "img": {
+                "src": "home-image.jpg",
+                "alt": "Home Image",
+                "width": "300",
+                "height": "200"
+              }
+            },
+            {
+              "id": "about",
+              "h2": "About Us",
+              "p": "Learn more about our <strong>company</strong> and <span class=\"highlight\">mission</span>.",
+              "table": {
+                "thead": {
+                  "tr": {
+                    "th": ["Name", "Position"]
+                  }
+                },
+                "tbody": {
+                  "tr": [
+                    {
+                      "td": ["John Doe", "CEO"]
+                    },
+                    {
+                      "td": ["Jane Smith", "CTO"]
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": "contact",
+              "h2": "Contact Us",
+              "form": {
+                "action": "/submit",
+                "method": "post",
+                "elements": [
+                  {
+                    "label": {
+                      "for": "name",
+                      "text": "Name:"
+                    },
+                    "input": {
+                      "type": "text",
+                      "id": "name",
+                      "name": "name",
+                      "required": true
+                    }
+                  },
+                  {
+                    "label": {
+                      "for": "email",
+                      "text": "Email:"
+                    },
+                    "input": {
+                      "type": "email",
+                      "id": "email",
+                      "name": "email",
+                      "required": true
+                    }
+                  },
+                  {
+                    "label": {
+                      "for": "message",
+                      "text": "Message:"
+                    },
+                    "textarea": {
+                      "id": "message",
+                      "name": "message",
+                      "rows": "4",
+                      "cols": "50"
+                    }
+                  },
+                  {
+                    "button": {
+                      "type": "submit",
+                      "text": "Send"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "footer": {
+          "p": "© 2024 Our Company. All rights reserved.",
+          "ul": {
+            "li": [
+              {
+                "a": {
+                  "href": "https://facebook.com",
+                  "target": "_blank",
+                  "text": "Facebook"
+                }
+              },
+              {
+                "a": {
+                  "href": "https://twitter.com",
+                  "target": "_blank",
+                  "text": "Twitter"
+                }
+              },
+              {
+                "a": {
+                  "href": "https://linkedin.com",
+                  "target": "_blank",
+                  "text": "LinkedIn"
+                }
+              }
+            ]
+          }
+        },
+        "script": {
+          "content": "console.log(\"This is a test script\");"
+        }
+      }
+    }
+  }
+  
