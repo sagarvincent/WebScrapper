@@ -1,33 +1,56 @@
 #include <stdio.h>
-#include<stack>
-#include<string>
-#include<queue>
+#include <stack>
+#include <string>
+#include <sstream>
 
 using namespace std;
 
-std::string parser(std::string html_content) 
+string parser(const string& html_content) 
 {
-    int i = 0;
-    stack<std::string> elem_end;
-    queue<std::string> elem_start;
-    bool is_elem;
-    stack<std::string> tag_end;
-    queue<std::string> tag_start;
-    bool is_tag;
-    char current;    
-    while(i<=html_content.size())
-    {
-        current = html_content[0];
-        if(current == '<') 
-        {
-            tag_start.push(current);
-            is_tag = true;
+    stack<string> tags;
+    stringstream result;
+    bool in_tag = false;
+    string current_tag;
 
-        }
-        else if(current == '>')
+    for (char c : html_content) 
+    {
+        if (c == '<') 
         {
-            tag_end.push(current);
-            is_tag = false;
+            in_tag = true;
+            current_tag.clear();
         }
-    } 
+        else if (c == '>') 
+        {
+            in_tag = false;
+            if (!current_tag.empty() && current_tag[0] != '/') 
+            {
+                tags.push(current_tag);
+                result << "Tag opened: " << current_tag << "\n";
+            }
+            else if (!current_tag.empty() && current_tag[0] == '/') 
+            {
+                if (!tags.empty() && tags.top() == current_tag.substr(1)) 
+                {
+                    result << "Tag closed: " << tags.top() << "\n";
+                    tags.pop();
+                }
+                else 
+                {
+                    result << "Error: Mismatched closing tag " << current_tag << "\n";
+                }
+            }
+        }
+        else if (in_tag) 
+        {
+            current_tag += c;
+        }
+    }
+
+    while (!tags.empty()) 
+    {
+        result << "Error: Unclosed tag " << tags.top() << "\n";
+        tags.pop();
+    }
+
+    return result.str();
 }
