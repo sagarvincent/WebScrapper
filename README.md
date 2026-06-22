@@ -51,6 +51,20 @@ python main.py --topic "renewable energy statistics" \
 - `--volume`: target number of records
 - `--format`: `jsonl` | `csv` | `json`
 
+### Web UI
+
+A Flask front-end wraps the same pipeline: fill in a form, watch live
+progress, and download the result.
+
+```bash
+python app.py        # then open http://localhost:5000
+```
+
+Jobs run in a background thread ([webapp/jobs.py](webapp/jobs.py)); the page
+polls a small JSON API ([app.py](app.py)) for streamed progress events and a
+download link. The CLI and UI share one code path — `run()` in
+[main.py](main.py) emits structured events both front-ends consume.
+
 ## Tests
 
 ```bash
