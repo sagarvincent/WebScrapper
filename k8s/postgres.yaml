@@ -1,0 +1,56 @@
+# Postgres as a single-instance StatefulSet with a PVC for durability.
+# For cloud, prefer a managed database (RDS/Cloud SQL/Azure DB) and delete
+# this file, pointing PG_DSN at the managed endpoint instead.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  clusterIP: None          # headless, for the StatefulSet
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          envFrom:
+            - secretRef:
+                name: webscrapper-secret   # POSTGRES_USER/PASSWORD/DB
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
+              subPath: pgdata
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "scraper"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+  volumeClaimTemplates:
+    - metadata:
+        name: pgdata
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        # storageClassName: standard   # set per cluster (omit to use default)
+        resources:
+          requests:
+            storage: 5Gi

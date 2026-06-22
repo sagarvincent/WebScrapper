@@ -1,26 +1,35 @@
-"""Flask web UI for WebScrapper.
+"""Flask web UI for WebScrapper (stateless tier).
 
-Serves a single-page form to submit a scrape job, then exposes a small JSON
-API the page polls for live progress and results:
+Serves the form and a small JSON API. Jobs are recorded in Postgres and run
+by separate worker pods; this tier holds no job state in memory, so it can
+be scaled to any number of replicas behind a load balancer.
 
     GET  /                       -> the UI
-    POST /api/jobs               -> start a job, returns {job_id}
-    GET  /api/jobs/<id>?since=N  -> status + new events since cursor N
-    POST /api/jobs/<id>/cancel   -> request cancellation
-    GET  /api/jobs/<id>/download -> download the output file
+    GET  /healthz                -> liveness/readiness probe
+    POST /api/jobs               -> record + enqueue a job, returns {job_id}
+    GET  /api/jobs/<id>?since=N   -> status + new events since cursor N
+    POST /api/jobs/<id>/cancel    -> request cancellation
+    GET  /api/jobs/<id>/download  -> stream results formatted on demand
 
-Run with:  python app.py
+Run locally with:  python app.py
 """
 
 import os
 
-from flask import Flask, abort, jsonify, render_template, request, send_file
+from flask import Flask, Response, abort, jsonify, render_template, request
 
+from src import db
 from src.job import JobSpec, OUTPUT_FORMATS, PURPOSES, URGENCIES
-from webapp.jobs import JobManager
+from src.output import OutputFormatter
+from src.storage import Storage
+from webapp import jobstore
+from webapp.jobs import JobManager, get_queue
 
 app = Flask(__name__)
 manager = JobManager()
+
+# Ensure tables exist on startup so a fresh deployment is self-initialising.
+db.init_schema()
 
 
 @app.route("/")
@@ -31,6 +40,17 @@ def index():
         urgencies=URGENCIES,
         formats=OUTPUT_FORMATS,
     )
+
+
+@app.get("/healthz")
+def healthz():
+    try:
+        with db.connect() as conn:
+            conn.execute("SELECT 1")
+        get_queue().connection.ping()
+    except Exception as exc:
+        return jsonify(status="unhealthy", error=str(exc)), 503
+    return jsonify(status="ok")
 
 
 @app.post("/api/jobs")
@@ -56,14 +76,14 @@ def create_job():
 
 @app.get("/api/jobs/<job_id>")
 def job_status(job_id):
-    record = manager.get(job_id)
-    if record is None:
-        abort(404)
     try:
         since = int(request.args.get("since", 0))
     except ValueError:
         since = 0
-    return jsonify(record.snapshot(since=since))
+    snapshot = manager.snapshot(job_id, since=since)
+    if snapshot is None:
+        abort(404)
+    return jsonify(snapshot)
 
 
 @app.post("/api/jobs/<job_id>/cancel")
@@ -75,14 +95,27 @@ def cancel_job(job_id):
 
 @app.get("/api/jobs/<job_id>/download")
 def download(job_id):
-    record = manager.get(job_id)
-    if record is None or not record.output_path:
+    job = jobstore.get_job(job_id)
+    if job is None:
         abort(404)
-    path = os.path.abspath(record.output_path)
-    if not os.path.exists(path):
-        abort(404)
-    return send_file(path, as_attachment=True, download_name=os.path.basename(path))
+
+    storage = Storage()
+    try:
+        records = storage.get_records(job_id)
+    finally:
+        storage.close()
+
+    spec = jobstore.spec_for(job)
+    formatter = OutputFormatter(spec)
+    body = formatter.format_records(records)
+    filename = f"scrape_{job_id[:8]}.{spec.output_format}"
+    return Response(
+        body,
+        mimetype=formatter.content_type(),
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(debug=True, host="0.0.0.0", port=port)

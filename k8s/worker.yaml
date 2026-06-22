@@ -1,0 +1,40 @@
+# Worker tier: runs the scrape pipeline pulled off the Redis queue. Scale to
+# match crawl throughput:  kubectl scale deploy/worker --replicas=N
+# Same image as web, but overrides the command to run the RQ worker.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      # Give in-flight jobs time to finish (or be cancelled) on rollout.
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: worker
+          image: webscrapper:0.2     # set to <registry>/webscrapper:<tag> for cloud
+          imagePullPolicy: IfNotPresent
+          command: ["python", "worker.py"]
+          envFrom:
+            - configMapRef:
+                name: webscrapper-config
+          env:
+            - name: PG_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: webscrapper-secret
+                  key: PG_DSN
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi

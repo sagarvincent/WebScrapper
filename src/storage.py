@@ -1,73 +1,52 @@
-"""SQLite persistence for scraped data.
+"""Postgres persistence for scraped data.
 
-Stores raw HTML and the parsed/scored records separately so a run can be
-inspected, resumed, or re-exported without re-crawling. Uses the stdlib
-sqlite3 module — no external database needed.
+Stores raw HTML and the parsed/scored records so a run can be inspected or
+re-exported without re-crawling. Backed by the shared Postgres database
+(see ``src/db.py``) so every web and worker pod sees the same data.
+
+The public methods keep the same names and signatures the pipeline used
+under SQLite, so ``main.run`` is unchanged.
 """
 
-import json
-import sqlite3
-import time
+from psycopg.types.json import Json
+
+from src import db
 
 
 class Storage:
-    def __init__(self, db_path: str = "scraper.db"):
-        self.conn = sqlite3.connect(db_path)
-        self.conn.row_factory = sqlite3.Row
-        self._init_schema()
-
-    def _init_schema(self):
-        self.conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS pages (
-                url        TEXT PRIMARY KEY,
-                raw_html   TEXT,
-                fetched_at REAL
-            );
-            CREATE TABLE IF NOT EXISTS records (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                job_id          TEXT,
-                url             TEXT,
-                data_json       TEXT,
-                relevance_score REAL
-            );
-            """
-        )
-        self.conn.commit()
+    def __init__(self):
+        self.conn = db.connect()
 
     def save_page(self, url: str, raw_html: str):
         self.conn.execute(
-            "INSERT OR REPLACE INTO pages (url, raw_html, fetched_at) VALUES (?, ?, ?)",
-            (url, raw_html, time.time()),
+            "INSERT INTO pages (url, raw_html) VALUES (%s, %s) "
+            "ON CONFLICT (url) DO UPDATE SET raw_html = EXCLUDED.raw_html, "
+            "fetched_at = now()",
+            (url, raw_html),
         )
-        self.conn.commit()
 
     def save_record(self, job_id: str, url: str, data: dict, relevance_score: float):
         self.conn.execute(
-            "INSERT INTO records (job_id, url, data_json, relevance_score) VALUES (?, ?, ?, ?)",
-            (job_id, url, json.dumps(data, ensure_ascii=False), relevance_score),
+            "INSERT INTO records (job_id, url, data_json, relevance_score) "
+            "VALUES (%s, %s, %s, %s)",
+            (job_id, url, Json(data), relevance_score),
         )
-        self.conn.commit()
 
     def record_count(self, job_id: str) -> int:
         cur = self.conn.execute(
-            "SELECT COUNT(*) AS n FROM records WHERE job_id = ?", (job_id,)
+            "SELECT COUNT(*) FROM records WHERE job_id = %s", (job_id,)
         )
-        return cur.fetchone()["n"]
+        return cur.fetchone()[0]
 
     def get_records(self, job_id: str):
         cur = self.conn.execute(
-            "SELECT url, data_json, relevance_score FROM records WHERE job_id = ? "
-            "ORDER BY relevance_score DESC",
+            "SELECT url, data_json, relevance_score FROM records "
+            "WHERE job_id = %s ORDER BY relevance_score DESC",
             (job_id,),
         )
         return [
-            {
-                "url": row["url"],
-                "data": json.loads(row["data_json"]),
-                "relevance_score": row["relevance_score"],
-            }
-            for row in cur.fetchall()
+            {"url": url, "data": data_json, "relevance_score": score}
+            for url, data_json, score in cur.fetchall()
         ]
 
     def close(self):

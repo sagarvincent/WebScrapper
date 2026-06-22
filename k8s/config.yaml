@@ -1,0 +1,23 @@
+# Non-secret config shared by web and worker pods.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: webscrapper-config
+data:
+  PORT: "8000"
+  # Service DNS names within the namespace (see redis/postgres Services).
+  REDIS_URL: "redis://redis:6379/0"
+---
+# Secret holds the Postgres DSN (contains credentials). Demo value below —
+# replace with a real secret (kubectl create secret / sealed-secrets / vault)
+# before any non-local use.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: webscrapper-secret
+type: Opaque
+stringData:
+  PG_DSN: "postgresql://scraper:scraper@postgres:5432/scraper"
+  POSTGRES_USER: "scraper"
+  POSTGRES_PASSWORD: "scraper"
+  POSTGRES_DB: "scraper"

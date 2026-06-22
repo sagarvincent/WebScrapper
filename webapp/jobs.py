@@ -1,98 +1,67 @@
-"""In-memory background job manager for the web UI.
+"""Job submission facade for the web tier.
 
-Each submitted JobSpec runs in its own daemon thread. Progress events from
-``main.run`` are appended to a per-job event log that the UI polls with a
-``since`` cursor, so the browser only ever pulls events it hasn't seen.
+In the decoupled design this no longer runs jobs in-process. ``start``
+records the job in Postgres and enqueues it on Redis for a worker to pick
+up; reads and cancellation delegate to the shared job store. All durable
+state lives in Postgres (see ``webapp/jobstore.py``), so the web tier is
+stateless and horizontally scalable.
 """
 
-import threading
-import time
-import uuid
+import os
 
-from main import run
+from redis import Redis
+from rq import Queue
+
+from src.job import JobSpec
+from webapp import jobstore
+
+QUEUE_NAME = "scrapes"
+JOB_TIMEOUT = int(os.environ.get("JOB_TIMEOUT", "3600"))  # seconds
+
+_redis = None
+_queue = None
 
 
-class JobRecord:
-    def __init__(self, job_id, spec):
-        self.id = job_id
-        self.spec = spec
-        self.status = "pending"  # pending | running | done | cancelled | error
-        self.events = []
-        self.collected = 0
-        self.target = spec.volume
-        self.output_path = None
-        self.error = None
-        self.created_at = time.time()
-        self.cancel_event = threading.Event()
-        self.lock = threading.Lock()
-
-    def snapshot(self, since=0):
-        with self.lock:
-            return {
-                "job_id": self.id,
-                "status": self.status,
-                "collected": self.collected,
-                "target": self.target,
-                "error": self.error,
-                "has_output": self.output_path is not None,
-                "events": self.events[since:],
-                "total_events": len(self.events),
-            }
+def get_queue() -> Queue:
+    """Lazily create the RQ queue, shared by the web tier and worker."""
+    global _redis, _queue
+    if _queue is None:
+        url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+        _redis = Redis.from_url(url)
+        _queue = Queue(QUEUE_NAME, connection=_redis)
+    return _queue
 
 
 class JobManager:
-    def __init__(self):
-        self._jobs = {}
-        self._lock = threading.Lock()
-
-    def start(self, spec):
-        job_id = uuid.uuid4().hex
-        record = JobRecord(job_id, spec)
-        with self._lock:
-            self._jobs[job_id] = record
-        thread = threading.Thread(target=self._run, args=(record,), daemon=True)
-        thread.start()
+    def start(self, spec: JobSpec) -> str:
+        job_id = jobstore.create_job(spec)
+        get_queue().enqueue("webapp.tasks.run_job", job_id, job_timeout=JOB_TIMEOUT)
         return job_id
 
-    def get(self, job_id):
-        with self._lock:
-            return self._jobs.get(job_id)
+    def get(self, job_id: str):
+        return jobstore.get_job(job_id)
 
-    def cancel(self, job_id):
-        record = self.get(job_id)
-        if record is not None:
-            record.cancel_event.set()
-            return True
-        return False
+    def cancel(self, job_id: str) -> bool:
+        return jobstore.request_cancel(job_id)
 
-    def _run(self, record):
-        record.status = "running"
+    def snapshot(self, job_id: str, since: int = 0):
+        """Build the status payload the UI polls for.
 
-        def on_event(event):
-            with record.lock:
-                record.events.append(event)
-                if event["type"] == "kept":
-                    record.collected = event["collected"]
-                    record.target = event["target"]
-                elif event["type"] == "done":
-                    record.output_path = event["output_path"]
-                elif event["type"] == "error":
-                    record.error = event.get("message")
-
-        try:
-            run(
-                record.spec,
-                on_event=on_event,
-                job_id=record.id,
-                cancel_event=record.cancel_event,
-            )
-            if record.cancel_event.is_set():
-                record.status = "cancelled"
-            elif record.error:
-                record.status = "error"
-            else:
-                record.status = "done"
-        except Exception as exc:  # surface unexpected failures to the UI
-            record.error = str(exc)
-            record.status = "error"
-            on_event({"type": "error", "message": str(exc)})
+        Returns None if the job does not exist. The JSON shape matches the
+        previous in-memory design so the front-end is unchanged: ``events``
+        plus a ``total_events`` cursor (here the highest event id seen).
+        """
+        job = jobstore.get_job(job_id)
+        if job is None:
+            return None
+        events, last_id = jobstore.get_events(job_id, since=since)
+        return {
+            "job_id": job_id,
+            "status": job["status"],
+            "collected": job["collected"],
+            "target": job["target"],
+            "error": job["error"],
+            "has_output": job["status"] in ("done", "cancelled") and job["collected"] > 0,
+            "events": events,
+            "total_events": last_id,
+        }

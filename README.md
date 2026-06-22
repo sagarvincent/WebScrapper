@@ -22,8 +22,8 @@ JobSpec ─▶ URLSourcer ─▶ Crawler ─▶ Fetcher ─▶ Parser ─▶ Fil
 | Fetcher | [src/fetcher.py](src/fetcher.py) | HTTP with retries/backoff + UA rotation; optional Selenium for JS pages. |
 | Parser | [src/parser.py](src/parser.py) | HTML → canonical recursive node tree (`tag`/`attrs`/`text`/`children`). |
 | Filter | [src/filter.py](src/filter.py) | Keyword-overlap relevance scoring; threshold varies by purpose. |
-| Storage | [src/storage.py](src/storage.py) | SQLite store of raw pages + scored records (resumable). |
-| Output | [src/output.py](src/output.py) | Writes JSONL / CSV / JSON. |
+| Storage | [src/storage.py](src/storage.py) | Postgres store of raw pages + scored records (shared across pods). |
+| Output | [src/output.py](src/output.py) | Renders JSONL / CSV / JSON (to disk for the CLI, or streamed on demand for downloads). |
 
 ### Why a pipeline (not an AI-agent orchestrator)?
 
@@ -51,19 +51,64 @@ python main.py --topic "renewable energy statistics" \
 - `--volume`: target number of records
 - `--format`: `jsonl` | `csv` | `json`
 
+> **Note:** persistence is now Postgres, so the CLI needs a database. Point
+> `PG_DSN` at one (e.g. `docker compose up postgres`), or just use the web UI
+> via Docker Compose below, which wires everything up for you.
+
 ### Web UI
 
 A Flask front-end wraps the same pipeline: fill in a form, watch live
-progress, and download the result.
+progress, and download the result. The CLI and UI share one code path —
+`run()` in [main.py](main.py) emits structured events both front-ends consume.
 
-```bash
-python app.py        # then open http://localhost:5000
+## Deployment — decoupled & horizontally scalable
+
+The web UI is split into a **stateless web tier** and a **scalable worker
+tier**, with all state in shared services so any pod can serve any job:
+
+```
+ web pods (Flask, N replicas)        ── stateless: create / poll / cancel / download
+   │ enqueue job_id                     ▲ read status + events
+   ▼                                    │
+ Redis (RQ queue)              Postgres (jobs, events, records, pages)
+   │ dequeue                            ▲ write progress + results
+   ▼                                    │
+ worker pods (RQ, M replicas) ── run the pipeline (main.run) ─┘
 ```
 
-Jobs run in a background thread ([webapp/jobs.py](webapp/jobs.py)); the page
-polls a small JSON API ([app.py](app.py)) for streamed progress events and a
-download link. The CLI and UI share one code path — `run()` in
-[main.py](main.py) emits structured events both front-ends consume.
+Why: the original design kept job state in one process's memory and SQLite on
+local disk, so it couldn't run more than one replica. Moving state to Postgres
+(durable, shared) and work to a Redis/RQ queue makes the web tier stateless
+and lets crawl throughput scale independently by adding workers. Downloads are
+formatted **on demand from the database**, so there is no shared file store to
+manage. Components: [webapp/jobs.py](webapp/jobs.py) (enqueue),
+[webapp/tasks.py](webapp/tasks.py) (worker task), [webapp/jobstore.py](webapp/jobstore.py)
+(state), [src/db.py](src/db.py) (Postgres), [worker.py](worker.py) (RQ worker).
+
+### Local (Docker Compose)
+
+```bash
+docker compose up --build           # web at http://localhost:8000
+docker compose up --scale worker=3  # scale the worker tier
+```
+
+### Kubernetes
+
+Manifests live in [k8s/](k8s/) (web Deployment + Service + Ingress + HPA,
+worker Deployment, Postgres StatefulSet, Redis, ConfigMap/Secret). Per-cluster
+spots — image registry, `ingressClassName`, `storageClassName`, and the demo
+Secret — are flagged inline.
+
+```bash
+docker build -t webscrapper:0.2 .
+# local cluster: kind load docker-image webscrapper:0.2   (or: minikube image load)
+kubectl apply -f k8s/
+kubectl get pods
+kubectl scale deploy/worker --replicas=5     # scale crawl throughput
+```
+
+Worker autoscaling on queue depth needs [KEDA](https://keda.sh)'s Redis scaler
+(a follow-up); the included HPA scales the web tier on CPU.
 
 ## Tests
 
