@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebScrapper</title>
+  <style>
+    :root { --bg:#0f1419; --panel:#1a2129; --line:#2c3845; --fg:#e6edf3; --muted:#8b98a5; --accent:#3b82f6; --good:#34d399; --bad:#f87171; }
+    * { box-sizing: border-box; }
+    body { margin:0; font:15px/1.5 system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+    .wrap { max-width:900px; margin:0 auto; padding:32px 20px 64px; }
+    h1 { margin:0 0 4px; font-size:24px; }
+    p.sub { margin:0 0 24px; color:var(--muted); }
+    .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:20px; margin-bottom:20px; }
+    label { display:block; font-size:13px; color:var(--muted); margin:0 0 4px; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:14px; }
+    input, select { width:100%; padding:9px 10px; background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:6px; font-size:14px; }
+    .actions { margin-top:18px; display:flex; gap:10px; align-items:center; }
+    button { padding:9px 18px; border:0; border-radius:6px; font-size:14px; font-weight:600; cursor:pointer; }
+    .btn-go { background:var(--accent); color:#fff; }
+    .btn-stop { background:#3a2530; color:var(--bad); }
+    .btn-dl { background:var(--good); color:#062b1c; text-decoration:none; display:inline-block; }
+    button:disabled { opacity:.45; cursor:not-allowed; }
+    .status { font-size:13px; color:var(--muted); }
+    .bar { height:8px; background:var(--bg); border-radius:5px; overflow:hidden; margin:14px 0 6px; border:1px solid var(--line); }
+    .bar > div { height:100%; width:0; background:var(--accent); transition:width .3s; }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); }
+    th { color:var(--muted); font-weight:600; }
+    td.score { color:var(--good); font-variant-numeric:tabular-nums; }
+    td a { color:var(--accent); text-decoration:none; word-break:break-all; }
+    #log { font-family:ui-monospace, monospace; font-size:12px; color:var(--muted); max-height:160px; overflow:auto; margin-top:10px; white-space:pre-wrap; }
+    .hidden { display:none; }
+    .err { color:var(--bad); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>WebScrapper</h1>
+    <p class="sub">Describe what you need — the scraper sources, crawls, parses, filters and delivers it.</p>
+
+    <form id="job-form" class="panel">
+      <div class="grid">
+        <div style="grid-column:1/-1">
+          <label for="topic">Topic — what data do you need?</label>
+          <input id="topic" name="topic" placeholder="e.g. renewable energy statistics" required>
+        </div>
+        <div>
+          <label for="purpose">Purpose</label>
+          <select id="purpose" name="purpose">
+            {% for p in purposes %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="urgency">Urgency</label>
+          <select id="urgency" name="urgency">
+            {% for u in urgencies %}<option value="{{ u }}" {% if u == 'medium' %}selected{% endif %}>{{ u }}</option>{% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="volume">Volume (records)</label>
+          <input id="volume" name="volume" type="number" min="1" value="50">
+        </div>
+        <div>
+          <label for="format">Output format</label>
+          <select id="format" name="format">
+            {% for f in formats %}<option value="{{ f }}">{{ f }}</option>{% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="actions">
+        <button type="submit" class="btn-go" id="start-btn">Start scrape</button>
+        <button type="button" class="btn-stop hidden" id="stop-btn">Stop</button>
+        <span class="status" id="status"></span>
+      </div>
+    </form>
+
+    <div class="panel hidden" id="progress-panel">
+      <div class="bar"><div id="bar-fill"></div></div>
+      <div class="status" id="progress-text">Starting…</div>
+      <a class="btn-dl hidden" id="download-btn" style="margin-top:14px">Download results</a>
+      <table id="results" class="hidden">
+        <thead><tr><th style="width:64px">Score</th><th>URL</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div id="log"></div>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('job-form');
+    const startBtn = document.getElementById('start-btn');
+    const stopBtn = document.getElementById('stop-btn');
+    const statusEl = document.getElementById('status');
+    const panel = document.getElementById('progress-panel');
+    const barFill = document.getElementById('bar-fill');
+    const progressText = document.getElementById('progress-text');
+    const resultsTable = document.getElementById('results');
+    const resultsBody = resultsTable.querySelector('tbody');
+    const logEl = document.getElementById('log');
+    const downloadBtn = document.getElementById('download-btn');
+
+    let jobId = null, cursor = 0, poller = null;
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const body = {
+        topic: form.topic.value,
+        purpose: form.purpose.value,
+        urgency: form.urgency.value,
+        volume: parseInt(form.volume.value, 10),
+        format: form.format.value,
+      };
+      resetUI();
+      const res = await fetch('/api/jobs', {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) { statusEl.innerHTML = '<span class="err">' + (data.error || 'Failed to start') + '</span>'; return; }
+      jobId = data.job_id;
+      startBtn.disabled = true;
+      stopBtn.classList.remove('hidden');
+      panel.classList.remove('hidden');
+      poller = setInterval(poll, 1000);
+      poll();
+    });
+
+    stopBtn.addEventListener('click', async () => {
+      if (jobId) { await fetch(`/api/jobs/${jobId}/cancel`, {method: 'POST'}); statusEl.textContent = 'Stopping…'; }
+    });
+
+    function resetUI() {
+      cursor = 0; if (poller) clearInterval(poller);
+      resultsBody.innerHTML = ''; logEl.textContent = '';
+      resultsTable.classList.add('hidden'); downloadBtn.classList.add('hidden');
+      barFill.style.width = '0%'; statusEl.textContent = ''; progressText.textContent = 'Starting…';
+    }
+
+    async function poll() {
+      const res = await fetch(`/api/jobs/${jobId}?since=${cursor}`);
+      if (!res.ok) { clearInterval(poller); return; }
+      const data = await res.json();
+      cursor = data.total_events;
+
+      for (const ev of data.events) handleEvent(ev);
+
+      if (data.target) {
+        const pct = Math.min(100, Math.round(100 * data.collected / data.target));
+        barFill.style.width = pct + '%';
+        progressText.textContent = `${data.collected} / ${data.target} records kept — ${data.status}`;
+      }
+
+      if (['done', 'cancelled', 'error'].includes(data.status)) {
+        clearInterval(poller);
+        startBtn.disabled = false;
+        stopBtn.classList.add('hidden');
+        if (data.status === 'error') statusEl.innerHTML = '<span class="err">' + (data.error || 'Job failed') + '</span>';
+        else statusEl.textContent = data.status === 'cancelled' ? 'Cancelled.' : 'Done.';
+        if (data.has_output) {
+          downloadBtn.href = `/api/jobs/${jobId}/download`;
+          downloadBtn.classList.remove('hidden');
+        }
+      }
+    }
+
+    function handleEvent(ev) {
+      if (ev.type === 'kept') {
+        resultsTable.classList.remove('hidden');
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td class="score">${ev.score.toFixed(2)}</td><td><a href="${ev.url}" target="_blank" rel="noopener">${ev.url}</a></td>`;
+        resultsBody.prepend(tr);
+      } else if (ev.message) {
+        logEl.textContent += ev.message + '\n';
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+    }
+  </script>
+</body>
+</html>

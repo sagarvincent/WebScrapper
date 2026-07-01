@@ -1,0 +1,12 @@
+.git
+__pycache__/
+*.pyc
+*.db
+scrape_*.jsonl
+scrape_*.csv
+scrape_*.json
+.venv/
+venv/
+k8s/
+*.md
+instagram.html

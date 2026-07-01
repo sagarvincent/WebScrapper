@@ -1,0 +1,137 @@
+name: CI/CD
+
+# Tests run on every branch push and on PRs. Build + deploy happen only when
+# code lands on `production` (i.e. a merge from development into production).
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [development, production]
+
+# One in-flight run per branch; cancel superseded runs to save minutes.
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/sagarvincent/webscrapper
+  NAMESPACE: webscrapper
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # CI: unit tests. Self-contained (no Postgres/Redis needed). Runs everywhere.
+  # ---------------------------------------------------------------------------
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run unit tests
+        run: python -m unittest test.unit.parserTest test.unit.HTMLFetcherTest
+
+  # ---------------------------------------------------------------------------
+  # Build the image and push to GHCR. Only on pushes to `production`, after
+  # tests pass. Uses the built-in GITHUB_TOKEN — no extra secret to configure.
+  # ---------------------------------------------------------------------------
+  build:
+    needs: test
+    if: github.ref == 'refs/heads/production' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write        # push to GitHub Container Registry
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ---------------------------------------------------------------------------
+  # Gate the deploy on the SSH secrets being present, so the pipeline stays
+  # green before the server is wired up. Required repo secrets to enable it:
+  #   SSH_HOST  — server hostname/IP        SSH_USER — deploy user
+  #   SSH_KEY   — private key (PEM)         SSH_PORT — optional, defaults to 22
+  # ---------------------------------------------------------------------------
+  check-secrets:
+    needs: build
+    runs-on: ubuntu-latest
+    outputs:
+      has-ssh: ${{ steps.check.outputs.has }}
+    steps:
+      - id: check
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          if [ -n "$SSH_HOST" ]; then
+            echo "has=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::SSH_HOST secret not set — skipping deploy. Add SSH_HOST/SSH_USER/SSH_KEY to enable."
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Deploy: SSH into the self-hosted Ubuntu server, apply the k8s/ manifests to
+  # its k3s cluster, pin web + worker to the freshly built image (by SHA), and
+  # wait for the rollout. The server pulls the image from GHCR.
+  # ---------------------------------------------------------------------------
+  deploy:
+    needs: [build, check-secrets]
+    if: needs.check-secrets.outputs.has-ssh == 'true'
+    runs-on: ubuntu-latest
+    env:
+      SSH_HOST: ${{ secrets.SSH_HOST }}
+      SSH_USER: ${{ secrets.SSH_USER }}
+      SSH_PORT: ${{ secrets.SSH_PORT }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up SSH
+        env:
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -p "${SSH_PORT:-22}" "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Copy manifests to server
+        run: |
+          scp -i ~/.ssh/id_deploy -P "${SSH_PORT:-22}" -r k8s \
+            "$SSH_USER@$SSH_HOST:/tmp/webscrapper-k8s"
+
+      - name: Apply and roll out on k3s
+        run: |
+          ssh -i ~/.ssh/id_deploy -p "${SSH_PORT:-22}" "$SSH_USER@$SSH_HOST" bash -s <<EOF
+          set -euo pipefail
+          kubectl get namespace "$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$NAMESPACE"
+          kubectl -n "$NAMESPACE" apply -f /tmp/webscrapper-k8s/
+          kubectl -n "$NAMESPACE" set image deployment/web web=$IMAGE:$GITHUB_SHA
+          kubectl -n "$NAMESPACE" set image deployment/worker worker=$IMAGE:$GITHUB_SHA
+          kubectl -n "$NAMESPACE" rollout status deployment/web --timeout=180s
+          kubectl -n "$NAMESPACE" rollout status deployment/worker --timeout=180s
+          EOF

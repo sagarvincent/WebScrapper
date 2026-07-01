@@ -1,3 +1,9 @@
 beautifulsoup4==4.12.3
 Requests==2.32.3
 selenium==4.21.0
+ddgs==9.14.4
+Flask==3.0.3
+psycopg[binary]==3.2.1
+redis==5.0.7
+rq==1.16.2
+gunicorn==22.0.0
