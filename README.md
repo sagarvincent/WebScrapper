@@ -88,7 +88,7 @@ manage. Components: [webapp/jobs.py](webapp/jobs.py) (enqueue),
 ### Local (Docker Compose)
 
 ```bash
-docker compose up --build           # web at http://localhost:8000
+docker compose up --build           # web at http://localhost:22001
 docker compose up --scale worker=3  # scale the worker tier
 ```
 
@@ -99,6 +99,23 @@ worker Deployment, Postgres StatefulSet, Redis, ConfigMap/Secret). Per-cluster
 spots — image registry, `ingressClassName`, `storageClassName`, and the demo
 Secret — are flagged inline.
 
+> ⚠️ The real Secret is created on the server, not stored in the manifests.
+> Use your own values — never commit real credentials:
+>
+> ```bash
+> kubectl create namespace webscrapper
+>
+> kubectl -n webscrapper create secret generic webscrapper-secret \
+>   --from-literal=PG_DSN='postgresql://scraper:<YOUR_PG_PASSWORD>@postgres:5432/scraper' \
+>   --from-literal=POSTGRES_USER='scraper' \
+>   --from-literal=POSTGRES_PASSWORD='<YOUR_PG_PASSWORD>' \
+>   --from-literal=POSTGRES_DB='scraper'
+> ```
+>
+> Set `<YOUR_PG_PASSWORD>` to a real secret. Change it and re-create the Secret
+> (`kubectl -n webscrapper delete secret webscrapper-secret` then re-run the
+> command above with the new password) before this is anything but a local demo.
+
 ```bash
 docker build -t webscrapper:0.2 .
 # local cluster: kind load docker-image webscrapper:0.2   (or: minikube image load)
@@ -106,6 +123,18 @@ kubectl apply -f k8s/
 kubectl get pods
 kubectl scale deploy/worker --replicas=5     # scale crawl throughput
 ```
+
+The web app is exposed as a **NodePort on 22001**, so it's reachable at
+`http://<node-ip>:22001` (locally `http://localhost:22001`) without a
+port-forward. NodePort's default range is 30000–32767; to use 22001 the API
+server needs `--service-node-port-range=22001-22999` (for k3s, add
+`--kube-apiserver-arg=service-node-port-range=22001-22999` to the k3s service
+and restart — see the note in [k8s/web.yaml](k8s/web.yaml)). On Docker Desktop
+without that flag, fall back to `kubectl port-forward svc/web 22001:22001`.
+
+Ports are kept within the allowed **22001–22999** range: web `22001`; Compose
+publishes Postgres on `22432` and Redis on `22379`. In-cluster traffic still
+uses the services' standard ports (`postgres:5432`, `redis:6379`).
 
 Worker autoscaling on queue depth needs [KEDA](https://keda.sh)'s Redis scaler
 (a follow-up); the included HPA scales the web tier on CPU.

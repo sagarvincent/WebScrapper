@@ -2,7 +2,7 @@
 
 Given a JobSpec, the URLSourcer turns the topic into search queries and
 returns a prioritised list of seed URLs for the crawler to start from. It
-uses DuckDuckGo search, which requires no API key.
+uses DuckDuckGo search (the ``ddgs`` package), which requires no API key.
 """
 
 
@@ -18,9 +18,12 @@ class URLSourcer:
         callers can degrade gracefully (e.g. prompt for manual seeds).
         """
         try:
-            from duckduckgo_search import DDGS
+            from ddgs import DDGS
         except ImportError:
-            return []
+            try:
+                from duckduckgo_search import DDGS  # legacy package name
+            except ImportError:
+                return []
 
         urls = []
         seen = set()

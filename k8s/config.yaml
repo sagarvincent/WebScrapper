@@ -4,8 +4,9 @@ kind: ConfigMap
 metadata:
   name: webscrapper-config
 data:
-  PORT: "8000"
+  PORT: "22001"
   # Service DNS names within the namespace (see redis/postgres Services).
+  # In-cluster traffic uses the services' standard ports.
   REDIS_URL: "redis://redis:6379/0"
 ---
 # Secret holds the Postgres DSN (contains credentials). Demo value below —

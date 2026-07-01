@@ -1,8 +1,12 @@
 # Local stand-in for the Kubernetes topology: Postgres + Redis + a stateless
 # web tier + a scalable worker tier. Prove decoupling locally before K8s:
 #
-#   docker compose up --build
+#   docker compose up --build           # web at http://localhost:22001
 #   docker compose up --scale web=2 --scale worker=3
+#
+# Host-published ports live in the allowed 22001-22999 range. Inside the
+# compose network the services still talk on their standard ports
+# (postgres:5432, redis:6379) via service DNS.
 #
 # (A reverse proxy/LB in front of multiple web replicas is out of scope here;
 #  scale workers freely, and scale web to confirm shared state via the DB.)
@@ -15,7 +19,7 @@ services:
       POSTGRES_PASSWORD: scraper
       POSTGRES_DB: scraper
     ports:
-      - "5432:5432"
+      - "22432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -27,7 +31,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "22379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -39,9 +43,9 @@ services:
     environment:
       PG_DSN: postgresql://scraper:scraper@postgres:5432/scraper
       REDIS_URL: redis://redis:6379/0
-      PORT: "8000"
+      PORT: "22001"
     ports:
-      - "8000:8000"
+      - "22001:22001"
     depends_on:
       postgres:
         condition: service_healthy

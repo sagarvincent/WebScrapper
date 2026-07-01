@@ -5,7 +5,7 @@ FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PORT=8000
+    PORT=22001
 
 WORKDIR /app
 
@@ -14,9 +14,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-EXPOSE 8000
+EXPOSE 22001
 
 # Default to the web tier. The worker Deployment overrides this with:
 #   command: ["python", "worker.py"]
 # Web is stateless now, so multiple gunicorn workers are safe.
-CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:8000", "--access-logfile", "-", "app:app"]
+CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:22001", "--access-logfile", "-", "app:app"]

@@ -18,10 +18,10 @@ spec:
     spec:
       containers:
         - name: web
-          image: webscrapper:0.2     # set to <registry>/webscrapper:<tag> for cloud
-          imagePullPolicy: IfNotPresent
+          image: ghcr.io/sagarvincent/webscrapper:0.2   # public GHCR package, no pull secret
+          imagePullPolicy: Always
           ports:
-            - containerPort: 8000
+            - containerPort: 22001
           envFrom:
             - configMapRef:
                 name: webscrapper-config
@@ -34,13 +34,13 @@ spec:
           readinessProbe:
             httpGet:
               path: /healthz
-              port: 8000
+              port: 22001
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
             httpGet:
               path: /healthz
-              port: 8000
+              port: 22001
             initialDelaySeconds: 15
             periodSeconds: 20
           resources:
@@ -56,11 +56,17 @@ kind: Service
 metadata:
   name: web
 spec:
+  type: NodePort
   selector:
     app: web
   ports:
-    - port: 80
-      targetPort: 8000
+    - port: 22001          # in-cluster Service port
+      targetPort: 22001    # container port (gunicorn)
+      nodePort: 22001      # exposed on every node's IP, within the allowed range
+  # NodePort default range is 30000-32767. To use 22001 the API server needs:
+  #   --service-node-port-range=22001-22999
+  # k3s: add to /etc/systemd/system/k3s.service ExecStart as
+  #   --kube-apiserver-arg=service-node-port-range=22001-22999  then restart k3s.
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -79,7 +85,7 @@ spec:
               service:
                 name: web
                 port:
-                  number: 80
+                  number: 22001
 ---
 # CPU-based autoscaling for the web tier. Worker autoscaling on queue depth
 # is a follow-up (needs KEDA's Redis scaler) — see README.

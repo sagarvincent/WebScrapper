@@ -19,8 +19,8 @@ spec:
       terminationGracePeriodSeconds: 60
       containers:
         - name: worker
-          image: webscrapper:0.2     # set to <registry>/webscrapper:<tag> for cloud
-          imagePullPolicy: IfNotPresent
+          image: ghcr.io/sagarvincent/webscrapper:0.2   # public GHCR package, no pull secret
+          imagePullPolicy: Always
           command: ["python", "worker.py"]
           envFrom:
             - configMapRef:
