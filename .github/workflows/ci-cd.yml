@@ -72,10 +72,15 @@ jobs:
           cache-to: type=gha,mode=max
 
   # ---------------------------------------------------------------------------
-  # Gate the deploy on the SSH secrets being present, so the pipeline stays
-  # green before the server is wired up. Required repo secrets to enable it:
-  #   SSH_HOST  — server hostname/IP        SSH_USER — deploy user
-  #   SSH_KEY   — private key (PEM)         SSH_PORT — optional, defaults to 22
+  # Gate the deploy on the required secrets being present, so the pipeline stays
+  # green before the server is wired up. The server is reached through a
+  # Cloudflare Tunnel, so we authenticate to Cloudflare Access with a service
+  # token and proxy SSH through `cloudflared`. Required repo secrets:
+  #   SSH_HOST               — the Access-protected SSH hostname (e.g. ssh.example.com)
+  #   SSH_USER               — Linux user on the server
+  #   SSH_KEY                — private key (PEM) for that user
+  #   CF_ACCESS_CLIENT_ID    — Access service token client id
+  #   CF_ACCESS_CLIENT_SECRET— Access service token client secret
   # ---------------------------------------------------------------------------
   check-secrets:
     needs: build
@@ -86,18 +91,20 @@ jobs:
       - id: check
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
+          CF_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
         run: |
-          if [ -n "$SSH_HOST" ]; then
+          if [ -n "$SSH_HOST" ] && [ -n "$CF_ID" ]; then
             echo "has=true" >> "$GITHUB_OUTPUT"
           else
             echo "has=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::SSH_HOST secret not set — skipping deploy. Add SSH_HOST/SSH_USER/SSH_KEY to enable."
+            echo "::notice::Deploy skipped — set SSH_HOST/SSH_USER/SSH_KEY and CF_ACCESS_CLIENT_ID/CF_ACCESS_CLIENT_SECRET to enable."
           fi
 
   # ---------------------------------------------------------------------------
-  # Deploy: SSH into the self-hosted Ubuntu server, apply the k8s/ manifests to
-  # its k3s cluster, pin web + worker to the freshly built image (by SHA), and
-  # wait for the rollout. The server pulls the image from GHCR.
+  # Deploy: reach the server over the Cloudflare Tunnel (cloudflared ProxyCommand
+  # + Access service token), apply the k8s/ manifests to its k3s cluster, pin
+  # web + worker to the freshly built image (by SHA), and wait for the rollout.
+  # The server pulls the image from GHCR.
   # ---------------------------------------------------------------------------
   deploy:
     needs: [build, check-secrets]
@@ -106,27 +113,46 @@ jobs:
     env:
       SSH_HOST: ${{ secrets.SSH_HOST }}
       SSH_USER: ${{ secrets.SSH_USER }}
-      SSH_PORT: ${{ secrets.SSH_PORT }}
+      # cloudflared reads these for headless (non-interactive) Access auth.
+      TUNNEL_SERVICE_TOKEN_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      TUNNEL_SERVICE_TOKEN_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up SSH
+      - name: Install cloudflared
+        run: |
+          # Pin to a build that honours service tokens: 2026.6.0 regressed and
+          # falls back to interactive browser auth (cloudflared issue #1673).
+          # Bump this once the fix ships.
+          VER=2026.5.1
+          curl -fsSL -o cloudflared \
+            "https://github.com/cloudflare/cloudflared/releases/download/${VER}/cloudflared-linux-amd64"
+          sudo install -m 0755 cloudflared /usr/local/bin/cloudflared
+          cloudflared --version
+
+      - name: Set up SSH key
         env:
           SSH_KEY: ${{ secrets.SSH_KEY }}
         run: |
-          mkdir -p ~/.ssh
-          echo "$SSH_KEY" > ~/.ssh/id_deploy
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy
           chmod 600 ~/.ssh/id_deploy
-          ssh-keyscan -p "${SSH_PORT:-22}" "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
 
-      - name: Copy manifests to server
+      - name: Deploy to k3s over the tunnel
         run: |
-          scp -i ~/.ssh/id_deploy -P "${SSH_PORT:-22}" -r k8s \
-            "$SSH_USER@$SSH_HOST:/tmp/webscrapper-k8s"
+          # Route SSH through the Cloudflare Tunnel. accept-new pins the host key
+          # on first connect (there is no directly reachable host:22 to keyscan).
+          SSH_OPTS=(
+            -i ~/.ssh/id_deploy
+            -o StrictHostKeyChecking=accept-new
+            -o ProxyCommand="cloudflared access ssh --hostname %h"
+          )
 
-      - name: Apply and roll out on k3s
-        run: |
-          ssh -i ~/.ssh/id_deploy -p "${SSH_PORT:-22}" "$SSH_USER@$SSH_HOST" bash -s <<EOF
+          scp "${SSH_OPTS[@]}" -r k8s "$SSH_USER@$SSH_HOST:/tmp/webscrapper-k8s"
+
+          ssh "${SSH_OPTS[@]}" "$SSH_USER@$SSH_HOST" bash -s <<EOF
           set -euo pipefail
           kubectl get namespace "$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$NAMESPACE"
           kubectl -n "$NAMESPACE" apply -f /tmp/webscrapper-k8s/
